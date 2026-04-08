@@ -1,3 +1,5 @@
-streamlit
+pandas
+numpy
 yfinance
-requests
+pandas_ta
+pyTelegramBotAPI
