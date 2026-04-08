@@ -5,14 +5,16 @@ import yfinance as yf
 import pandas_ta as ta
 import telebot
 from datetime import datetime
+import holidays
 
 # ======================================================
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN Y CREDENCIALES
 # ======================================================
 TOKEN = "8264571722:AAEP0Za-6ateXX8eE6OEhRxv9HgeVhwVWg4"
 CHAT_ID = "5785324442"
 bot = telebot.TeleBot(TOKEN)
 
+# Las 15 divisas solicitadas
 SIMBOLOS = [
     "EURAUD=X", "EURCAD=X", "EURCHF=X", "GBPAUD=X", "GBPCAD=X",
     "GBPJPY=X", "AUDUSD=X", "AUDCAD=X", "AUDJPY=X", "EURUSD=X",
@@ -22,70 +24,93 @@ SIMBOLOS = [
 COOLDOWN = {}
 
 # ======================================================
-# 2. MOTOR SNIPER (MURALLA Y FIBO)
+# 2. MOTOR DE ANÁLISIS: MURALLA, FIBO Y TRAYECTORIA
 # ======================================================
 def analizar_sniper(s):
     try:
-        # Descarga data de 1 min (2 días para asegurar 240 velas)
+        # Descargamos data de 1 min (2 días para asegurar las 240 velas)
         df = yf.download(s, interval="1m", period="2d", progress=False)
         if len(df) < 240: return
 
-        # Indicadores
+        # Indicadores Técnicos
         df['EMA3'] = ta.ema(df['Close'], length=3)
         df['EMA9'] = ta.ema(df['Close'], length=9)
         df['EMA20'] = ta.ema(df['Close'], length=20)
         df['RSI'] = ta.rsi(df['Close'], length=14)
 
-        # Análisis Muralla (240 velas)
+        # 1. Filtro Muralla (35 toques en las últimas 240 velas)
         df_240 = df.tail(240)
         soporte = df_240['Low'].min()
         resistencia = df_240['High'].max()
-        toques = ((df_240['Low'] - soporte).abs() <= (soporte * 0.0002)).sum()
+        # Margen de precisión para detectar el "toque"
+        margen = soporte * 0.0002 
+        toques = ((df_240['Low'] - soporte).abs() <= margen).sum()
 
-        # Fibonacci (50-70%)
+        # 2. Fibonacci (Zona de retroceso 50-70%)
         rango = resistencia - soporte
-        f50, f70 = resistencia - (0.5 * rango), resistencia - (0.7 * rango)
+        fibo_50 = resistencia - (0.50 * rango)
+        fibo_70 = resistencia - (0.70 * rango)
 
         v_act = df.iloc[-1]
         v_ant = df.iloc[-2]
         precio = v_act['Close']
 
-        # SEÑAL TRAYECTORIA (Cruce 3/9 + Fibo)
-        if f70 <= precio <= f50 and v_act['EMA20'] > v_ant['EMA20']:
+        # --- SEÑAL 1: TRAYECTORIA UNIFORME (Gatillo 2 min) ---
+        if fibo_70 <= precio <= fibo_50 and v_act['EMA20'] > v_ant['EMA20']:
+            # Confirmación con cruce de EMA 3 sobre 9
             if v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']:
-                enviar(s, precio, toques, "🚀 TRAYECTORIA (2 MIN)")
+                enviar_telegram(s, precio, toques, "🚀 TRAYECTORIA UNIFORME")
 
-        # SEÑAL COLISIÓN (Muralla 35x)
+        # --- SEÑAL 2: COLISIÓN EN MURALLA ---
         if toques >= 35 and abs(precio - soporte) <= (precio * 0.0004):
-            est = "🔥 REBOTE" if v_act['RSI'] > 55 else "⚠️ RUPTURA"
-            enviar(s, precio, toques, f"🧱 COLISIÓN: {est}")
+            rsi_val = v_act['RSI']
+            # Diagnóstico de fuerza según RSI
+            if rsi_val > 55:
+                est = "🔥 REBOTE CONFIRMADO"
+            elif rsi_val < 40:
+                est = "⚠️ POSIBLE RUPTURA"
+            else:
+                est = "⌛ LATERALIZANDO"
+            
+            enviar_telegram(s, precio, toques, f"🧱 COLISIÓN: {est}")
 
-    except:
+    except Exception:
         pass
 
-def enviar(s, p, t, tipo):
-    key = f"{s}_{tipo}"
-    if key not in COOLDOWN or (time.time() - COOLDOWN[key] > 600):
-        bot.send_message(CHAT_ID, f"🎯 SNIPER V10\nActivo: {s}\nPrecio: {p:.5f}\nToques: {t}\nInfo: {tipo}")
-        COOLDOWN[key] = time.time()
+def enviar_telegram(s, p, t, tipo):
+    clave = f"{s}_{tipo}"
+    # Cooldown de 10 minutos para no saturar con el mismo activo
+    if clave not in COOLDOWN or (time.time() - COOLDOWN[clave] > 600):
+        msg = (f"🎯 *RAÚL SNIPER V10*\n\n"
+               f"💎 *Activo:* {s}\n"
+               f"💰 *Precio:* {p:.5f}\n"
+               f"🧱 *Choques:* {t}\n"
+               f"📡 *Señal:* {tipo}")
+        bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+        COOLDOWN[clave] = time.time()
 
 # ======================================================
-# 3. INTERFAZ ESTÁTICA (EVITA EL ERROR REMOVECHILD)
+# 3. INTERFAZ ESTABLE Y BUCLE DE EJECUCIÓN
 # ======================================================
+st.set_page_config(page_title="Raúl Sniper V10", layout="centered")
 st.title("🏹 Raúl Sniper Pro V10")
-st.info("Radar activo 📡. Las señales se envían a Telegram.")
+st.write("Estado: **Radar Escaneando...** 📡")
+st.info("Las señales se envían automáticamente a Telegram. No cierres esta pestaña.")
 
-# Solo arranca si es día de semana
-if datetime.now().weekday() < 5:
-    if 'ready' not in st.session_state:
-        bot.send_message(CHAT_ID, "🚀 Radar Online")
-        st.session_state.ready = True
+# Filtro de seguridad para fines de semana y feriados
+ahora = datetime.now()
+feriados_us = holidays.US()
 
-    # Bucle silencioso: NO hay st.write ni st.text aquí adentro
+if ahora.weekday() < 5 and ahora not in feriados_us:
+    if 'bot_on' not in st.session_state:
+        bot.send_message(CHAT_ID, "🚀 *Bot V10 Online*")
+        st.session_state.bot_on = True
+
+    # BUCLE SILENCIOSO: Evita el error 'removeChild' al no actualizar la UI web
     while True:
         for s in SIMBOLOS:
             analizar_sniper(s)
-            time.sleep(0.5)
-        time.sleep(25)
+            time.sleep(0.5) 
+        time.sleep(20)
 else:
-    st.error("Mercado Cerrado.")
+    st.error("Mercado Cerrado o Día Festivo. El bot está en pausa.")
