@@ -117,38 +117,81 @@ def procesar_sniper_v8(s):
         t_bajista = df_v['High'].tail(8).is_monotonic_decreasing
 
         # Pre-Aviso Tendencia
-        if (t_alcista or t_bajista) and 0.08 < dist:
-            enviar_señal(s, "📈 AVISO", "Tendencia naciendo", precio, 0, "Atento a Impulso", cooldown=1200)
+import time
+from datetime import datetime, timedelta
 
-        if t_alcista and f78 <= precio <= f50:
-            if v_act['E3'] > v_act['E9'] and v_ant['E3'] <= v_ant['E9']:
-                enviar_señal(s, "🚀 IMPULSO", "COMPRA (1-2 min)", precio, h_20, "FIBO OTE")
-        elif t_bajista and f50v <= precio <= f78v:
-            if v_act['E3'] < v_act['E9'] and v_ant['E3'] >= v_ant['E9']:
-                enviar_señal(s, "📉 IMPULSO", "VENTA (1-2 min)", precio, l_20, "FIBO OTE")
-    except: pass
-
-# --- LOOP PRINCIPAL (15 ACTIVOS) ---
-SIMBOLOS = [
-    "BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "DOGE-USD", 
-    "AVAX-USD", "PEPE-USD", "LINK-USD", "ADA-USD", "XRP-USD", 
-    "SHIB-USD", "EURUSD=X", "GBPUSD=X", "GBPJPY=X", "AUDUSD=X"
-]
-
-if 'alertas' not in st.session_state: st.session_state.alertas = {}
-if 'ultima_h' not in st.session_state: st.session_state.ultima_h = 0
-
-st.title("Raúl Sniper Elite V8.1")
-st.write(f"🕵️ Radar activo en {len(SIMBOLOS)} activos. Escríbeme '/status' por Telegram.")
-
-while True:
-    revisar_comandos_telegram()
-    ahora_unix = time.time()
-    if ahora_unix - st.session_state.ultima_h > 10800:
-        generar_reporte_3h(SIMBOLOS)
-        st.session_state.ultima_h = ahora_unix
-
-    for s in SIMBOLOS:
-        procesar_sniper_v8(s)
+# --- LÓGICA DE COPILOTO (SEGURIDAD Y NOTICIAS) ---
+def es_horario_seguro():
+    """Filtra los 30 min de apertura/cierre de sesiones principales"""
+    ahora_utc = datetime.utcnow()
+    # Ejemplo: Apertura Londres 07:00, NY 13:00 UTC
+    bloqueos = [("06:30", "07:30"), ("12:30", "13:30"), ("15:30", "16:30")]
     
+    hora_actual = ahora_utc.strftime("%H:%M")
+    for inicio, fin in bloqueos:
+        if inicio <= hora_actual <= fin:
+            return False
+    return True
+
+def analizar_uniformidad(df_camino):
+    """Calcula si la tendencia hacia la zona es uniforme (Fibonacci)"""
+    # Si las velas son proporcionales y siguen la EMA 20 sin saltos locos
+    desviacion = df_camino['Close'].std()
+    promedio_vol = df_camino['Volume'].mean()
+    # Si la desviación es baja, la tendencia es uniforme (ideal para Fibo)
+    return desviacion < (df_camino['Close'].mean() * 0.01)
+
+def predecir_zona(toques, fuerza_entrada, rsi_actual):
+    """El Copiloto decide si habrá REBOTE o RUPTURA"""
+    if toques > 40 and rsi_actual > 70: # Muy agotado
+        return "REBOTE PROBABLE 📉"
+    elif toques < 10 and fuerza_entrada > 2.0: # Mucha fuerza, zona nueva
+        return "RUPTURA PROBABLE 💥"
+    else:
+        return "ZONA DE CHOQUE (Vigilando...)"
+
+# --- MOTOR SNIPER ---
+def procesar_copiloto_sniper(s):
+    if not es_horario_seguro():
+        return # El copiloto mantiene el bot apagado en aperturas/cierres
+
+    df = obtener_datos(s) # (Función previa de descarga de datos)
+    v_act = df.iloc[-1]
+    v_ant = df.iloc[-2]
+    
+    # 1. DETECCIÓN DE ZONA DE CHOQUE
+    zona_fuerte = v_act['Soporte']
+    num_toques = contar_toques(df, zona_fuerte)
+    
+    # 2. SISTEMA DE RADAR (Copiloto avisando)
+    distancia = abs(v_act['Close'] - zona_fuerte) / v_act['Close']
+    
+    if 0.001 <= distancia <= 0.003: # El precio se dirige a la zona
+        uniforme = analizar_uniformidad(df.tail(10))
+        prediccion = predecir_zona(num_toques, 1.5, v_act['RSI'])
+        
+        msg_copiloto = (f"🎙️ *COPILOTO:* {s} en ruta a zona de choque.\n"
+                        f"Target: {zona_fuerte:.5f} ({num_toques} toques)\n"
+                        f"Tendencia Uniforme: {'SÍ (Fibo apto) ✅' if uniforme else 'NO (Mucho ruido) ⚠️'}\n"
+                        f"Predicción: *{prediccion}*")
+        enviar_telegram(msg_copiloto)
+
+    # 3. DISPARO SNIPER (Cruce 3 vs 9 + EMA 20 + Fibo)
+    if num_toques >= 35:
+        # La EMA 20 asegura la tendencia mayor
+        t_alcista = v_act['EMA20'] > v_ant['EMA20']
+        
+        # Filtro de "Muralla" flexibilizado al 0.05%
+        cerca_muro = abs(v_act['Close'] - zona_fuerte) <= (v_act['Close'] * 0.0005)
+        
+        if t_alcista and cerca_muro:
+            # Gatillo: Cruce E3 sobre E9 al CIERRE DE VELA
+            if v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']:
+                enviar_telegram(f"🚀 *SEÑAL SNIPER:* COMPRA en {s}\nConfianza: ALTA (Uniforme)")
+
+# --- LOOP ---
+while True:
+    if es_horario_seguro():
+        for s in SIMBOLOS:
+            procesar_copiloto_sniper(s)
     time.sleep(15)
