@@ -6,10 +6,8 @@ import time
 import requests
 
 # --- CONFIGURACIÓN TELEGRAM ---
-# Ya te puse tu token aquí abajo
 TOKEN = "8264571722:AAEP0Za-6ateXX8eE6OEhRxv9HgeVhwVWg4"
-# REEMPLAZA EL NÚMERO DE ABAJO POR TU CHAT ID (Sácalo de @userinfobot)
-CHAT_ID = "TU_CHAT_ID_AQUI" 
+CHAT_ID = "5785324442" 
 
 def enviar_telegram(mensaje):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={mensaje}"
@@ -33,14 +31,14 @@ st.title("🎯 Sniper Intelligence: Confirmación + Telegram")
 # --- SEGURIDAD ---
 password = st.sidebar.text_input("Contraseña", type="password")
 if password != "raul123":
-    st.error("Introduce la clave, menor.")
+    st.error("Introduce la clave, Raúl.")
     st.stop()
 
 # Lista de activos para Scalping
 SIMBOLOS = ["SOL-USD", "PEPE-USD", "BTC-USD", "AUDUSD=X", "EURUSD=X", "GBPUSD=X", "GBPJPY=X"]
 MIN_TOUCHES = 35 
 
-# Memoria para no repetir mensajes de la misma señal
+# Memoria para no repetir mensajes
 if 'ultima_alerta' not in st.session_state:
     st.session_state.ultima_alerta = {}
 
@@ -72,16 +70,15 @@ def analizar_precision(s):
     dist_pct = (distancia / best_p) * 100
     confirmacion = None
     
-    # Solo dispara si la vela actual confirma la dirección después de limpiar zona
     if dist_pct < 0.02:
         # VENTA
         if v_actual['Close'] < v_actual['Open'] and v_actual['Close'] < v_previa['Close']:
             if precio_actual < best_p:
-                confirmacion = "📉 VENTA (PUT) - FUERZA CONFIRMADA"
+                confirmacion = "📉 VENTA (PUT) - FUERZA"
         # COMPRA
         elif v_actual['Close'] > v_actual['Open'] and v_actual['Close'] > v_previa['Close']:
             if precio_actual > best_p:
-                confirmacion = "🚀 COMPRA (CALL) - FUERZA CONFIRMADA"
+                confirmacion = "🚀 COMPRA (CALL) - FUERZA"
             
     return {
         "Par": s, "Precio": precio_actual, "Muralla": best_p, 
@@ -114,7 +111,6 @@ while True:
             for d in resultados:
                 if d['Confirmacion']:
                     ahora = datetime.datetime.now()
-                    # Filtro para que no te mande el mismo mensaje cada 15 segundos
                     if d['Par'] not in st.session_state.ultima_alerta or (ahora - st.session_state.ultima_alerta[d['Par']]).seconds > 300:
                         msg = f"🎯 SNIPER ALERT!\nPar: {d['Par']}\nAcción: {d['Confirmacion']}\nPrecio: {d['Precio']}\n¡MÉTELA YA (1-2 MIN)!"
                         enviar_telegram(msg)
