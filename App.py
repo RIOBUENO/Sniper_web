@@ -26,16 +26,16 @@ SIMBOLOS = ["SOL-USD", "PEPE-USD", "BTC-USD", "AUDUSD=X", "EURUSD=X", "GBPUSD=X"
 MIN_TOUCHES = 35 
 
 def analizar_precision(s):
-    # Traemos data de 1 minuto para ver el movimiento de las velas
     df_hist = yf.download(s, interval="15m", period="5d", progress=False)
     df_velas = yf.download(s, interval="1m", period="1h", progress=False)
     
-    # Datos de las últimas dos velas cerradas
+    if df_velas.empty or len(df_velas) < 2:
+        return None
+
     v_actual = df_velas.iloc[-1]
     v_previa = df_velas.iloc[-2]
-    precio_actual = v_actual['Close']
+    precio_actual = float(v_actual['Close'])
     
-    # Buscador de Murallas (Igual a como lo teníamos)
     highs = df_hist['High']
     lows = df_hist['Low']
     precios = pd.concat([highs, lows])
@@ -51,21 +51,18 @@ def analizar_precision(s):
             
     distancia = abs(precio_actual - best_p)
     dist_pct = (distancia / best_p) * 100
-    
     confirmacion = None
     
-    # --- LÓGICA DE GATILLO QUIRÚRGICO ---
-    # 1. El precio debe haber estado o estar muy cerca de la muralla (Zona de Imán)
+    # LÓGICA DE GATILLO: Espera a que la vela actual confirme el giro después del toque
     if dist_pct < 0.02:
-        # 2. CASO VENTA (PUT): El precio besó arriba y la vela actual cierra roja con fuerza
-        # Verificamos que el cierre actual sea menor al de la vela anterior (Fuerza bajista)
+        # VENTA (PUT): Vela actual roja y cerrando por debajo de la anterior tras tocar muralla
         if v_actual['Close'] < v_actual['Open'] and v_actual['Close'] < v_previa['Close']:
-            if precio_actual < best_p: # Ya empezó a bajar de la muralla
+            if precio_actual < best_p:
                 confirmacion = "📉 VENTA (PUT) - FUERZA CONFIRMADA"
         
-        # 3. CASO COMPRA (CALL): El precio besó abajo y la vela actual cierra verde con fuerza
+        # COMPRA (CALL): Vela actual verde y cerrando por arriba de la anterior tras tocar muralla
         elif v_actual['Close'] > v_actual['Open'] and v_actual['Close'] > v_previa['Close']:
-            if precio_actual > best_p: # Ya empezó a subir de la muralla
+            if precio_actual > best_p:
                 confirmacion = "🚀 COMPRA (CALL) - FUERZA CONFIRMADA"
             
     return {
@@ -79,22 +76,22 @@ while True:
     with placeholder.container():
         st.write(f"⌛ Analizando velas de 1min: {datetime.datetime.now().strftime('%H:%M:%S')}")
         
-        c1, c2 = st.columns([2, 1])
+        c1, c2 = st.columns([2, 1]) # Aquí estaba el detalle, ya está igualito abajo
         
         resultados = []
         for s in SIMBOLOS:
             try:
                 res = analizar_precision(s)
-                if res['Toques'] >= MIN_TOUCHES:
+                if res and res['Toques'] >= MIN_TOUCHES:
                     resultados.append(res)
             except: continue
 
-        with col2: # Panel de monitoreo
+        with c2: # Ahora sí dice c2 igual que arriba
             st.subheader("📡 Radar")
             for r in resultados:
                 st.write(f"**{r['Par']}**: {r['Precio']:.5f} (M: {r['Toques']}T)")
 
-        with col1: # Señales de ejecución
+        with c1: # Ahora sí dice c1
             st.subheader("🔥 GATILLO DE OPERACIÓN")
             disparos = [r for r in resultados if r['Confirmacion'] is not None]
             
@@ -108,6 +105,6 @@ while True:
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.info("Precio en zona de conflicto. Esperando confirmación de la vela de fuerza...")
+                st.info("Esperando que el precio deje de pendejear y confirme dirección...")
 
     time.sleep(15)
