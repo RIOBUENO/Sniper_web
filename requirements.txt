@@ -1,6 +1,4 @@
-pandas
-numpy
+streamlit
+pyTelegramBotAPI
 yfinance
 pandas-ta
-pytelegrambotapi
-streamlit
