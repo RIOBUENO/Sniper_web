@@ -8,125 +8,117 @@ from datetime import datetime
 import holidays
 
 # ======================================================
-# 1. CONFIGURACIÓN Y CREDENCIALES
+# 1. CONFIGURACIÓN DE CREDENCIALES
 # ======================================================
 TOKEN = "8264571722:AAEP0Za-6ateXX8eE6OEhRxv9HgeVhwVWg4"
 CHAT_ID = "5785324442"
 bot = telebot.TeleBot(TOKEN)
 
-# Las 15 divisas confirmadas
+# Las 15 divisas de Forex solicitadas
 SIMBOLOS = [
     "EURAUD=X", "EURCAD=X", "EURCHF=X", "GBPAUD=X", "GBPCAD=X",
     "GBPJPY=X", "AUDUSD=X", "AUDCAD=X", "AUDJPY=X", "EURUSD=X",
     "GBPUSD=X", "USDJPY=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X"
 ]
 
+# Diccionario para evitar spam de mensajes (Cooldown de 10 min)
 COOLDOWN = {}
 
 # ======================================================
-# 2. FILTROS DE SEGURIDAD (DÍAS Y HORAS)
-# ======================================================
-def mercado_abierto():
-    ahora = datetime.now()
-    if ahora.weekday() >= 5: # Sábado y Domingo
-        return False, "Mercado Cerrado (Fin de Semana)"
-    
-    us_holidays = holidays.US()
-    if ahora in us_holidays:
-        return False, "Día Festivo (USA)"
-    
-    return True, "Operativo"
-
-# ======================================================
-# 3. EL CEREBRO SNIPER: MURALLA, FIBO Y TRAYECTORIA
+# 2. MOTOR DE ANÁLISIS TÉCNICO (MURALLA Y FIBO)
 # ======================================================
 def analizar_sniper(s):
     try:
-        # Descarga de 240 velas para análisis de fondo
+        # Descargamos datos de 1 minuto (pedimos 2 días para asegurar 240 velas)
         df = yf.download(s, interval="1m", period="2d", progress=False)
         if len(df) < 240: return
 
-        # Indicadores Técnicos
+        # Cálculo de Indicadores
         df['EMA3'] = ta.ema(df['Close'], length=3)
         df['EMA9'] = ta.ema(df['Close'], length=9)
         df['EMA20'] = ta.ema(df['Close'], length=20)
         df['RSI'] = ta.rsi(df['Close'], length=14)
 
-        # --- FILTRO DE MURALLA (35 toques en 240 velas) ---
+        # --- ANÁLISIS DE MURALLA (240 VELAS ATRÁS) ---
         df_240 = df.tail(240)
         soporte_h = df_240['Low'].min()
         resistencia_h = df_240['High'].max()
+        
+        # Filtro de choque: El precio debe estar a menos de 0.02% del soporte
         margen = soporte_h * 0.0002 
         toques = ((df_240['Low'] - soporte_h).abs() <= margen).sum()
 
-        # --- CÁLCULO DE FIBONACCI (Retroceso 50-70%) ---
+        # --- ANÁLISIS TRAYECTORIA (FIBONACCI 50-70%) ---
         rango = resistencia_h - soporte_h
         fibo_50 = resistencia_h - (0.50 * rango)
         fibo_70 = resistencia_h - (0.70 * rango)
 
-        v_act = df.iloc[-1]
-        v_ant = df.iloc[-2]
+        v_act = df.iloc[-1] # Vela actual
+        v_ant = df.iloc[-2] # Vela anterior (confirmación de cierre)
         precio = v_act['Close']
 
-        # --- LÓGICA 1: TRAYECTORIA UNIFORME (2 MINUTOS) ---
+        # CONDICIÓN 1: TRAYECTORIA PARA 2 MINUTOS
+        # Impulso uniforme, sobre EMA 20 y en zona Fibo
         en_fibo = fibo_70 <= precio <= fibo_50
-        tendencia_ema20 = v_act['EMA20'] > v_ant['EMA20'] and precio > v_act['EMA20']
-        cruce_confirmado = v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']
+        tendencia_ok = v_act['EMA20'] > v_ant['EMA20'] and precio > v_act['EMA20']
+        cruce_3_9 = v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']
 
-        if tendencia_ema20 and en_fibo and cruce_confirmado:
-            disparar_alerta(s, precio, toques, "🚀 TRAYECTORIA UNIFORME (2 MIN)")
+        if tendencia_ok and en_fibo and cruce_3_9:
+            lanzar_alerta(s, precio, toques, "🚀 TRAYECTORIA UNIFORME (Gatillo 2 min)")
 
-        # --- LÓGICA 2: ZONA DE COLISIÓN (MURALLA) ---
+        # CONDICIÓN 2: ZONA DE COLISIÓN (MURALLA DE 35 TOQUES)
         en_zona_choque = abs(precio - soporte_h) <= (precio * 0.0004)
         
         if en_zona_choque and toques >= 35:
             rsi_val = v_act['RSI']
+            # Diagnóstico de la barrera
             if rsi_val > 55:
-                diagnostico = "🔥 REBOTE CONFIRMADO"
+                veredicto = "🔥 REBOTE CONFIRMADO"
             elif rsi_val < 40:
-                diagnostico = "⚠️ RUPTURA INMINENTE"
+                veredicto = "⚠️ POSIBLE RUPTURA"
             else:
-                diagnostico = "⌛ LATERALIZANDO (Sin fuerza)"
+                veredicto = "⌛ MAMANDO MIEMBRO (Lateralizando)"
             
-            disparar_alerta(s, precio, toques, f"🧱 COLISIÓN\nVeredicto: {diagnostico}")
+            lanzar_alerta(s, precio, toques, f"🧱 ZONA DE COLISIÓN\nVeredicto: {veredicto}")
 
-    except:
+    except Exception as e:
         pass
 
-def disparar_alerta(s, precio, toques, tipo):
+def lanzar_alerta(s, precio, toques, tipo):
     clave = f"{s}_{tipo}"
     if clave not in COOLDOWN or (time.time() - COOLDOWN[clave] > 600):
-        msg = (f"🎯 *SNIPER V10 DISPARA*\n\n"
+        msg = (f"🎯 *RAÚL SNIPER V10*\n\n"
                f"💎 *Activo:* {s}\n"
                f"💰 *Precio:* {precio:.5f}\n"
                f"🧱 *Toques Muralla:* {toques}\n"
-               f"📡 *Estado:* {tipo}")
+               f"📡 *Alerta:* {tipo}\n"
+               f"⏰ *Hora:* {datetime.now().strftime('%H:%M:%S')}")
         bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
         COOLDOWN[clave] = time.time()
 
 # ======================================================
-# 4. INTERFAZ Y BUCLE DE EJECUCIÓN
+# 3. INTERFAZ Y CONTROL DE OPERACIÓN
 # ======================================================
-st.set_page_config(page_title="Raúl Sniper V10")
+st.set_page_config(page_title="Raúl Sniper V10", page_icon="🏹")
 st.title("🏹 Raúl Sniper Pro V10")
+st.write("Estado: **Radar Escaneando...** 📡")
 
-abierto, mensaje = mercado_abierto()
+# Filtro de Feriados y Fin de Semana
+ahora = datetime.now()
+us_hols = holidays.US()
 
-if abierto:
-    st.success(f"✅ Bot Online: {mensaje}")
-    # Usamos un placeholder para evitar errores de actualización de nodos (removeChild)
-    placeholder = st.empty()
+if ahora.weekday() < 5 and ahora not in us_hols:
+    st.success("✅ Mercado Forex Abierto - Monitoreando 15 Divisas")
     
-    if 'bot_on' not in st.session_state:
-        bot.send_message(CHAT_ID, "🚀 *Bot V10 Activado*\nMonitoreando 15 divisas.")
-        st.session_state.bot_on = True
+    if 'iniciado' not in st.session_state:
+        bot.send_message(CHAT_ID, "✅ *Radar V10 Activado*\nMuralla 35x y Fibo 50-70% operativos.")
+        st.session_state.iniciado = True
 
+    # Bucle silencioso para evitar errores de redibujado en Streamlit
     while True:
-        with placeholder.container():
-            st.write(f"Última actualización: {datetime.now().strftime('%H:%M:%S')}")
-            for s in SIMBOLOS:
-                analizar_sniper(s)
-                time.sleep(0.5) # Evita bloqueos de yfinance
-        time.sleep(15) # Pausa entre ciclos
+        for s in SIMBOLOS:
+            analizar_sniper(s)
+            time.sleep(0.5) 
+        time.sleep(20)
 else:
-    st.error(f"😴 Bot en reposo: {mensaje}")
+    st.error(f"😴 Mercado Cerrado o Festivo. El bot no operará hoy.")
