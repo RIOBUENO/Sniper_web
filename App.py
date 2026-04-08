@@ -8,13 +8,12 @@ import telebot
 from datetime import datetime
 
 # ======================================================
-# 1. CREDENCIALES (YA INTEGRADAS)
+# 1. CREDENCIALES
 # ======================================================
 TOKEN = "8264571722:AAEP0Za-6ateXX8eE6OEhRxv9HgeVhwVWg4"
 CHAT_ID = "5785324442"
 bot = telebot.TeleBot(TOKEN)
 
-# Activos a monitorear
 SIMBOLOS = [
     "EURUSD=X", "GBPUSD=X", "EURCHF=X", "GBPJPY=X", 
     "BTC-USD", "ETH-USD", "SOL-USD", "AUDUSD=X"
@@ -26,12 +25,13 @@ MIN_TOQUES = 35
 COOLDOWN = {}
 
 # ======================================================
-# 2. LÓGICA DE TRADING (COPILOTO + SNIPER)
+# 2. FUNCIONES LÓGICAS (EL CEREBRO)
 # ======================================================
 
 def es_horario_seguro():
     ahora_utc = datetime.utcnow()
     hora_actual = ahora_utc.strftime("%H:%M")
+    # Bloqueos de apertura/cierre
     bloqueos = [("06:30", "07:30"), ("12:30", "13:30"), ("15:30", "16:30")]
     for inicio, fin in bloqueos:
         if inicio <= hora_actual <= fin: return False
@@ -45,17 +45,16 @@ def enviar_alerta(titulo, msg):
 
 def procesar_sniper(s):
     try:
-        # Descarga de datos
         df = yf.download(s, interval="1m", period="1d", progress=False)
         if df.empty or len(df) < 50: return
 
-        # Indicadores
+        # Indicadores Sniper
         df['EMA3'] = ta.ema(df['Close'], length=3)
         df['EMA9'] = ta.ema(df['Close'], length=9)
         df['EMA20'] = ta.ema(df['Close'], length=20)
         df['RSI'] = ta.rsi(df['Close'], length=14)
         
-        # Muralla
+        # Detección de Muralla
         zona_soporte = df['Low'].rolling(window=50).min().iloc[-1]
         margen = zona_soporte * 0.0003
         toques = ((df['Low'] - zona_soporte).abs() <= margen).sum()
@@ -64,14 +63,14 @@ def procesar_sniper(s):
         v_ant = df.iloc[-2]
         precio = v_act['Close']
 
-        # --- RADAR ---
+        # --- LÓGICA DE RADAR (Aviso previo) ---
         distancia = abs(precio - zona_soporte) / precio
         if 0.0008 <= distancia <= 0.0025:
             if s not in COOLDOWN or (time.time() - COOLDOWN[s] > 900):
-                enviar_alerta("AVISO DE RADAR", f"Activo: {s}\nZona: {zona_soporte:.5f}\nToques: {toques}\nCopiloto analizando...")
+                enviar_alerta("AVISO DE RADAR", f"Activo: {s}\nZona: {zona_soporte:.5f}\nToques: {toques}\nCopiloto: Analizando entrada.")
                 COOLDOWN[s] = time.time()
 
-        # --- SNIPER ---
+        # --- LÓGICA SNIPER (Disparo) ---
         t_alcista = v_act['EMA20'] > v_ant['EMA20']
         cerca_muro = abs(precio - zona_soporte) <= (precio * TOLERANCIA_MURO)
 
@@ -84,44 +83,46 @@ def procesar_sniper(s):
         pass
 
 # ======================================================
-# 3. INTERFAZ ESTÁTICA (ANTI-ERRORES)
+# 3. INTERFAZ ESTÁTICA (A PRUEBA DE ERRORES)
 # ======================================================
 
-st.set_page_config(page_title="Raúl Sniper Elite", layout="centered")
-st.title("Raúl Sniper Elite V8.2 🕵️")
-st.success("SISTEMA ACTIVO: El bot está operando en el fondo.")
-st.write("Puedes cerrar esta ventana, las señales llegarán a tu Telegram.")
+st.set_page_config(page_title="Raúl Sniper Elite", page_icon="🕵️")
+st.title("Raúl Sniper Elite V8.2 🚀")
+st.success("BOT OPERATIVO EN EL SERVIDOR")
+st.info("La interfaz web se ha desactivado para evitar errores de Node. Toda la información llegará a tu Telegram.")
 
-# Función para responder /status
+# Listener para el comando /status
 def revisar_comandos():
     try:
         updates = bot.get_updates(offset=-1, timeout=1)
         for u in updates:
             if u.message and u.message.text == "/status":
-                bot.send_message(u.message.chat.id, "✅ Operativo. Escaneando el mercado.")
+                bot.send_message(u.message.chat.id, "🤖 Raúl Sniper: Estoy activo y vigilando el mercado. No te fallaré, chamo.")
     except:
         pass
 
-# Mensaje inicial
 if 'iniciado' not in st.session_state:
-    enviar_alerta("SISTEMA ONLINE", "Bot activo. Prueba escribiendo /status en Telegram.")
+    enviar_alerta("SISTEMA CONECTADO", "El bot ha superado el error de Node. Estoy escaneando.")
     st.session_state.iniciado = True
 
 # ======================================================
-# 4. LOOP INFINITO (SIN ELEMENTOS VISUALES QUE CAMBIEN)
+# 4. LOOP DE EJECUCIÓN (FONDO)
 # ======================================================
 
 while True:
     try:
+        # Escuchar Telegram
         revisar_comandos()
         
+        # Ejecutar Estrategia
         if es_horario_seguro():
             for s in SIMBOLOS:
                 procesar_sniper(s)
-                time.sleep(1) # Respiro
+                time.sleep(0.5)
         
-        time.sleep(15) # Frecuencia de escaneo
+        # Pausa larga para que la web no se recargue locamente
+        time.sleep(20)
         
-    except Exception as e:
+    except Exception:
         time.sleep(10)
         continue
