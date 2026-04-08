@@ -18,20 +18,21 @@ SIMBOLOS = [
     "GBPUSD=X", "USDJPY=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X"
 ]
 
-if 'cooldown' not in st.session_state: st.session_state.cooldown = {}
+# Usamos caché para que el cooldown sobreviva a recargas
+if 'cooldown' not in st.session_state:
+    st.session_state.cooldown = {}
 
 # ======================================================
-# 2. MOTOR DE ANÁLISIS
+# 2. MOTOR DE ANÁLISIS SILENCIOSO
 # ======================================================
 def analizar_sniper(s):
     try:
         df = yf.download(s, interval="1m", period="1d", progress=False)
-        if df.empty or len(df) < 50: return None
+        if df.empty or len(df) < 50: return
 
         df['EMA3'] = ta.ema(df['Close'], length=3)
         df['EMA9'] = ta.ema(df['Close'], length=9)
         df['EMA20'] = ta.ema(df['Close'], length=20)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
 
         df_reciente = df.tail(120)
         soporte_h = df_reciente['Low'].min()
@@ -53,8 +54,8 @@ def analizar_sniper(s):
         if (fibo_70 <= precio <= fibo_50) and (v_act['EMA20'] > v_ant['EMA20']):
             if v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']:
                 enviar_alerta(s, precio, toques, "🚀 IMPULSO")
-        return f"{s}: {precio:.4f}"
-    except: return None
+    except:
+        pass
 
 def enviar_alerta(s, precio, toques, tipo):
     clave = f"{s}_{tipo}"
@@ -64,28 +65,23 @@ def enviar_alerta(s, precio, toques, tipo):
         try:
             bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
             st.session_state.cooldown[clave] = ahora
-        except: pass
+        except:
+            pass
 
 # ======================================================
-# 3. INTERFAZ RESISTENTE
+# 3. INTERFAZ "FANTASMA" (SOLO TELEGRAM)
 # ======================================================
-st.set_page_config(page_title="Raúl Sniper V10")
-st.title("🏹 Raúl Sniper Pro V10")
+st.set_page_config(page_title="Raúl Sniper Engine")
+st.title("🏹 Engine en ejecución")
+st.info("La web no se actualizará. Todo el monitoreo es por Telegram.")
 
-# Contenedor único para evitar el error de removeChild
-placeholder = st.empty()
+# El bucle ahora es un fragmento que NO imprime nada en pantalla
+@st.fragment(run_every=60)
+def engine_loop():
+    # Esta función corre en segundo plano cada minuto
+    for s in SIMBOLOS:
+        analizar_sniper(s)
+        time.sleep(1) # Pausa suave para evitar bloqueos de IP
 
-@st.fragment(run_every=30)
-def loop_principal():
-    with placeholder.container():
-        st.success(f"📡 Radar Activo | {datetime.now().strftime('%H:%M:%S')}")
-        resultados = []
-        for s in SIMBOLOS:
-            res = analizar_sniper(s)
-            if res: resultados.append(res)
-        st.code("\n".join(resultados))
-
-if datetime.now().weekday() < 5:
-    loop_principal()
-else:
-    st.info("Mercado cerrado.")
+# Inicio automático
+engine_loop()
