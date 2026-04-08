@@ -1,6 +1,3 @@
-streamlit
-pyTelegramBotAPI
 yfinance
 pandas-ta
-pandas
-holidays
+pyTelegramBotAPI
