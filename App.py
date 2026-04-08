@@ -1,58 +1,58 @@
-import streamlit as st
-import time
-import yfinance as yf
-import pandas_ta as ta
-import telebot
-import threading
+importar streamlit como st
+Importar yfinance como yf
+importar pandas como pd
+importar fecha y hora
+hora de importación
 
-# 1. CONFIGURACIÓN
-TOKEN = "8264571722:AAEP0Za-6ateXX8eE6OEhRxv9HgeVhwVWg4"
-CHAT_ID = "5785324442"
-bot = telebot.TeleBot(TOKEN)
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Raúl Francotirador Web", layout="wide")
+st.title("ðŸŽ¯ Panel de Control: Inercia & Murallas")
 
-SIMBOLOS = [
-    "EURAUD=X", "EURCAD=X", "EURCHF=X", "GBPAUD=X", "GBPCAD=X",
-    "GBPJPY=X", "AUDUSD=X", "AUDCAD=X", "AUDJPY=X", "EURUSD=X",
-    "GBPUSD=X", "USDJPY=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X"
-]
+# --- SEGURIDAD ---
+contraseña = st.sidebar.text_input("Contraseña de Acceso", type="password")
+if contraseña != "raul123": # <--- ESTA ES TU CLAVE, PUEDES CAMBIARLA
+    st.error("Introduce la clave para ver el mercado, menor.")
+    st.stop()
 
-# 2. MOTOR (HILO SEPARADO)
-def motor_silencioso():
-    cooldown = {}
-    while True:
-        try:
-            for s in SIMBOLOS:
-                df = yf.download(s, interval="1m", period="1d", progress=False)
-                if df.empty or len(df) < 50: continue
+# --- PARÃ METROS ---
+SIMBOLOS = ["SOL-USD", "AUDCAD=X", "AUDJPY=X", "AUDUSD=X", "EURAUD=X", "GBPUSD=X", "GBPJPY=X"]
+MIN_TOQUES = 35
 
-                # Lógica simplificada para máxima velocidad
-                df['EMA3'] = ta.ema(df['Close'], length=3)
-                df['EMA9'] = ta.ema(df['Close'], length=9)
-                df['EMA20'] = ta.ema(df['Close'], length=20)
-                
-                soporte = df['Low'].tail(120).min()
-                precio = float(df['Close'].iloc[-1])
-                toques = ((df['Low'].tail(120) - soporte).abs() <= (soporte * 0.0003)).sum()
+def obtener_murallas(df, min_t):
+    umbral = df['Close'].std() * 0.15
+    precios = pd.concat([df['Máximo'], df['Mínimo']]).unique()
+    niveles = []
+    para p en precios:
+        toques = ((df['Alto'] >= p - umbral) & (df['Bajo'] <= p + umbral)).sum()
+        Si los toques son mayores o iguales a min_t:
+            si no hay ninguno(abs(p - l['p']) < umbral * 2 para l en niveles):
+                niveles.append({'p': p, 't': toques})
+    niveles de retorno
 
-                # Alerta Muralla
-                if abs(precio - soporte) <= (precio * 0.0005) and toques >= 25:
-                    tag = f"{s}_M"
-                    if tag not in cooldown or (time.time() - cooldown[tag] > 600):
-                        bot.send_message(CHAT_ID, f"🧱 MURALLA: {s} @ {precio:.5f} ({toques} toques)")
-                        cooldown[tag] = time.time()
+marcador de posición = st.empty()
 
-                time.sleep(1)
-            time.sleep(15)
-        except:
-            time.sleep(10)
-
-# 3. INTERFAZ (MÍNIMA ABSOLUTA)
-st.title("Sniper Activo")
-
-if "ejecutando" not in st.session_state:
-    thread = threading.Thread(target=motor_silencioso, daemon=True)
-    thread.start()
-    st.session_state.ejecutando = True
-    bot.send_message(CHAT_ID, "🚀 Motor Sniper V10 Iniciado.")
-
-st.write("El bot está corriendo en segundo plano. Puedes cerrar esta ventana.")
+mientras que verdadero:
+    con placeholder.container():
+        st.write(f"Última actualización: {datetime.datetime.now().strftime('%H:%M:%S')}")
+        datos_tabla = []
+        para s en SÍMBOLOS:
+            intentar:
+                d15 = yf.download(s, interval="15m", period="5d", progress=False)
+                d1 = yf.download(s, interval="1m", period="1d", progress=False)
+                cerrar = d1['Cerrar'].iloc[-1]
+                murallas = get_murallas(d15, MIN_TOUCHES)
+                si murallas:
+                    m_cercana = min(murallas, key=lambda x: abs(close - x['p']))
+                    dist = abs(close - m_cercana['p'])
+                    dist_pct = (dist / m_cercana['p']) * 100
+                    estado = "âšª Neutral"
+                    if 0.01 < dist_pct < 0.09: estado = "ðŸ”¥ Â¡IMÃ N ACTIVO!"
+                    datos_tabla.append({
+                        "Activo": s, "Precio": f"{close:.5f}",
+                        "Muralla": f"{m_cercana['p']:.5f}", "Toques": m_cercana['t'],
+                        "Distancia %": f"{dist_pct:.3f}%", "Estado": estado
+                    })
+            excepto: continuar
+        si datos_tabla:
+            st.table(pd.DataFrame(datos_tabla))
+        tiempo.dormir(60)
