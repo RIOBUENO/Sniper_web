@@ -3,3 +3,4 @@ pyTelegramBotAPI
 yfinance
 pandas-ta
 pandas
+holidays
