@@ -2,3 +2,4 @@ streamlit
 pyTelegramBotAPI
 yfinance
 pandas-ta
+pandas
