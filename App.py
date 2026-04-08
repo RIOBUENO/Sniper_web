@@ -8,86 +8,110 @@ import telebot
 from datetime import datetime
 
 # ======================================================
-# 1. CREDENCIALES
+# 1. CONFIGURACIÓN Y CREDENCIALES
 # ======================================================
 TOKEN = "8264571722:AAEP0Za-6ateXX8eE6OEhRxv9HgeVhwVWg4"
 CHAT_ID = "5785324442"
 bot = telebot.TeleBot(TOKEN)
 
-SIMBOLOS = ["EURUSD=X", "GBPUSD=X", "EURCHF=X", "GBPJPY=X", "BTC-USD", "ETH-USD", "AUDUSD=X"]
-
-# Parámetros de la Estrategia Original
-MIN_TOQUES = 35           
-TOLERANCIA_MURO = 0.0005  
+SIMBOLOS = ["EURUSD=X", "GBPUSD=X", "GBPJPY=X", "BTC-USD", "ETH-USD", "AUDUSD=X"]
+MIN_TOQUES = 35  # Tu filtro de muralla
 COOLDOWN = {}
 
 # ======================================================
-# 2. LÓGICA DE TRADING (Impulso y Zona de Choque)
+# 2. CEREBRO TÉCNICO: FIBONACCI & MURALLA
 # ======================================================
 
-def procesar_sniper(s):
+def analizar_sniper(s):
     try:
-        # Descarga de datos para análisis de tendencia uniforme
+        # Descarga de 240 velas para análisis de zona de choque
         df = yf.download(s, interval="1m", period="5d", progress=False)
         if df.empty or len(df) < 240: return
 
-        # Cálculo de EMAs para la trayectoria
+        # Indicadores de Trayectoria
         df['EMA3'] = ta.ema(df['Close'], length=3)
         df['EMA9'] = ta.ema(df['Close'], length=9)
         df['EMA20'] = ta.ema(df['Close'], length=20)
         
-        # Análisis de la Muralla (Últimas 240 velas)
-        df_240 = df.tail(240)
-        zona_soporte = df_240['Low'].min()
-        margen = zona_soporte * 0.0003
-        toques = ((df_240['Low'] - zona_soporte).abs() <= margen).sum()
+        # --- DETECCIÓN DE MURALLA (Zona de Choque) ---
+        df_recent = df.tail(240)
+        max_periodo = df_recent['High'].max()
+        min_periodo = df_recent['Low'].min()
+        
+        # Muralla Inferior (Soporte de 35 toques)
+        margen = min_periodo * 0.0003
+        toques = ((df_recent['Low'] - min_periodo).abs() <= margen).sum()
+
+        # --- CÁLCULO DE FIBONACCI (Impulso y Retroceso) ---
+        # Definimos el impulso reciente
+        alto_impulso = df_recent['High'].max()
+        bajo_impulso = df_recent['Low'].min()
+        rango = alto_impulso - bajo_impulso
+        
+        # Niveles de oro: 50% y 70%
+        fibo_50 = alto_impulso - (0.50 * rango)
+        fibo_70 = alto_impulso - (0.70 * rango)
 
         v_act = df.iloc[-1]
         v_ant = df.iloc[-2]
         precio = v_act['Close']
 
-        # FILTROS FUNDAMENTALES
-        # 1. Impulso: EMA 20 alcista y precio por encima
-        impulso_alcista = v_act['EMA20'] > v_ant['EMA20'] and precio > v_act['EMA20']
+        # --- LÓGICA DE DECISIÓN ---
         
-        # 2. Zona de Choque: Mínimo 35 toques para confirmar liquidez
-        # 3. Gatillo: Cruce de EMA 3 sobre EMA 9 al cierre
-        if toques >= MIN_TOQUES and impulso_alcista:
-            if v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']:
+        # 1. ¿Va en trayectoria? (EMA 20 arriba y precio en zona Fibo)
+        en_fibo = fibo_70 <= precio <= fibo_50
+        tendencia_fuerte = v_act['EMA20'] > v_ant['EMA20']
+        
+        # 2. GATILLO: Cruce 3/9 en cierre de vela
+        cruce_al_cierre = v_act['EMA3'] > v_act['EMA9'] and v_ant['EMA3'] <= v_ant['EMA9']
+
+        # 3. DETECTOR DE REBOTE O RUPTURA EN MURALLA
+        cerca_muralla = abs(precio - min_periodo) <= (precio * 0.0005)
+        
+        pronostico = ""
+        if cerca_muralla:
+            # Si hay fuerza (RSI subiendo) es REBOTE, si el precio se queda "pendejeando" es RUPTURA
+            rsi = ta.rsi(df['Close'], length=14).iloc[-1]
+            pronostico = "🔥 PROBABLE REBOTE" if rsi > 45 else "⚠️ PELIGRO: POSIBLE RUPTURA"
+
+        # --- DISPARO ---
+        if toques >= MIN_TOQUES and tendencia_fuerte and en_fibo and cruce_al_cierre:
+            
+            if s not in COOLDOWN or (time.time() - COOLDOWN[s] > 600):
+                msg = (f"🎯 *¡SNIPER FIBONACCI DISPARA!*\n\n"
+                       f"📈 *Activo:* {s}\n"
+                       f"💰 *Precio:* {precio:.5f}\n"
+                       f"🧱 *Muralla:* {toques} toques detectados\n"
+                       f"📏 *Fibo:* En zona de oro (50%-70%)\n"
+                       f"🚀 *Impulso:* EMA 20 Confirmada\n"
+                       f"⚔️ *Cruce 3/9:* EXITOSO al cierre\n"
+                       f"🔮 *Estado Muralla:* {pronostico}")
                 
-                # Verificación de cercanía a la orilla (Trayectoria)
-                if abs(precio - zona_soporte) <= (precio * TOLERANCIA_MURO):
-                    if s not in COOLDOWN or (time.time() - COOLDOWN[s] > 600):
-                        msg = (f"🎯 ¡SEÑAL SNIPER DETECTADA!\n"
-                               f"Activo: {s}\n"
-                               f"Precio: {precio:.5f}\n"
-                               f"Zona de Choque: {toques} toques\n"
-                               f"Confirmación: Impulso EMA20 + Cruce 3/9")
-                        
-                        bot.send_message(CHAT_ID, msg)
-                        COOLDOWN[s] = time.time()
-    except:
+                bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+                COOLDOWN[s] = time.time()
+    except Exception as e:
         pass
 
 # ======================================================
-# 3. INTERFAZ ESTÁTICA (A PRUEBA DE ERRORES)
+# 3. INTERFAZ STREAMLIT (Limpia)
 # ======================================================
 
-st.title("Raúl Sniper Elite V8.2")
-st.write("### ✅ BOT OPERATIVO")
-st.write("Análisis de 240 velas activo. Las señales se envían a Telegram.")
+st.set_page_config(page_title="Raúl Sniper V9", layout="centered")
+st.title("🏹 Raúl Sniper Pro+ V9")
+st.subheader("Estrategia: Muralla 35x + Fibo 50-70%")
+st.write("---")
+st.info("El bot está analizando impulsos, retrocesos y zonas de choque en tiempo real.")
 
-# Notificación de reinicio exitoso
-if 'init' not in st.session_state:
-    bot.send_message(CHAT_ID, "🚀 Bot Sniper restablecido. Buscando zonas de choque y barrido de liquidez.")
-    st.session_state.init = True
+if 'ready' not in st.session_state:
+    bot.send_message(CHAT_ID, "✅ *Sistema V9 Online*\nEstrategia de Fibonacci y Muralla cargada.", parse_mode="Markdown")
+    st.session_state.ready = True
 
 # ======================================================
-# 4. LOOP DE FONDO
+# 4. BUCLE INFINITO
 # ======================================================
 
 while True:
     for s in SIMBOLOS:
-        procesar_sniper(s)
+        analizar_sniper(s)
         time.sleep(1)
-    time.sleep(20)
+    time.sleep(15)
